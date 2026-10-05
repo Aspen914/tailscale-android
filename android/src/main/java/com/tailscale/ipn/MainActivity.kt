@@ -337,6 +337,7 @@ class MainActivity : ComponentActivity() {
                       onNavigateToBugReport = { navController.navigate("bugReport") },
                       onNavigateToAbout = { navController.navigate("about") },
                       onNavigateToDNSSettings = { navController.navigate("dnsSettings") },
+                      onNavigateToResolverPresets = { navController.navigate("resolverPresets") },
                       onNavigateToSplitTunneling = { navController.navigate("splitTunneling") },
                       onNavigateToTailnetLock = { navController.navigate("tailnetLock") },
                       onNavigateToSubnetRouting = { navController.navigate("subnetRouting") },
@@ -414,6 +415,7 @@ class MainActivity : ComponentActivity() {
               }
               composable("bugReport") { BugReportView(backTo("settings")) }
               composable("dnsSettings") { DNSSettingsView(backTo("settings")) }
+              composable("resolverPresets") { com.tailscale.ipn.ui.view.ResolverPresetsView() }
               composable("splitTunneling") { SplitTunnelAppPickerView(backTo("settings")) }
               composable("tailnetLock") { TailnetLockSetupView(backTo("settings")) }
               composable("subnetRouting") { SubnetRoutingView(backTo("settings")) }

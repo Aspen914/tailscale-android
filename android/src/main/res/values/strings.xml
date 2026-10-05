@@ -403,4 +403,8 @@
     <string name="copy_magic_dns_address">Copy MagicDNS hostname</string>
     <string name="copy_ipv4_address">Copy IPv4</string>
     <string name="copy_ipv6_address">Copy IPv6</string>
+    <string name="resolver_presets">Resolver presets</string>
+    <string name="resolver_presets_subtitle">Choose how DNS is resolved for this profile</string>
+    <string name="using_system_dns">Using system resolver</string>
+    <string name="using_custom_dns">Using custom resolver</string>
 </resources>

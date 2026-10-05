@@ -87,14 +87,9 @@ fun SettingsView(
 
       Lists.SectionDivider()
       Setting.Text(
-          R.string.dns_settings,
-          subtitle =
-              corpDNSEnabled?.let {
-                stringResource(
-                    if (it) R.string.using_tailscale_dns else R.string.not_using_tailscale_dns
-                )
-              },
-          onClick = settingsNav.onNavigateToDNSSettings,
+          R.string.resolver_presets,
+          subtitle = stringResource(R.string.resolver_presets_subtitle),
+          onClick = settingsNav.onNavigateToResolverPresets,
       )
 
       Lists.ItemDivider()
@@ -298,5 +293,5 @@ fun SettingsPreview() {
   vm.tailNetLockEnabled.set(true)
   vm.isAdmin.set(true)
   vm.managedByOrganization.set("Tails and Scales Inc.")
-  SettingsView(SettingsNav({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}), vm)
+  SettingsView(SettingsNav({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}), vm)
 }

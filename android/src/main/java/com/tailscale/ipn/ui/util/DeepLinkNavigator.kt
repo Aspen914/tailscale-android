@@ -27,8 +27,16 @@ class DeepLinkNavigator(private val navController: NavHostController) {
     return when (window) {
       "main" -> handleMain(tail)
       "settings" -> {
-        showSettings()
-        true
+        when (tail.firstOrNull()) {
+          "resolverPresets" -> {
+            navigateOverMain("resolverPresets")
+            true
+          }
+          else -> {
+            showSettings()
+            true
+          }
+        }
       }
       else -> false
     }

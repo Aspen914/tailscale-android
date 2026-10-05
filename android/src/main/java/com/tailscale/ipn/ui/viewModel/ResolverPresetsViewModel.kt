@@ -28,7 +28,9 @@ import kotlinx.serialization.json.Json
 import java.util.concurrent.TimeUnit
 
 private const val PREF_KEY_RESOLVER_PRESETS = "resolver_presets"
-private const val TAG = "ResolverPresetsVM"
+private val TAG = "ResolverPresetsVM"
+
+private val resolverPresetsJson = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
 /**
  * Applies the currently-active resolver preset (stored in shared prefs) to the
@@ -42,8 +44,7 @@ fun pushActiveResolverPresetToLibtailscale() {
   val raw = prefs.getString("resolver_presets", null) ?: "{}"
   val store =
       try {
-        Json { encodeDefaults = true; ignoreUnknownKeys = true }
-            .decodeFromString<ResolverStore>(raw)
+        resolverPresetsJson.decodeFromString<ResolverStore>(raw)
       } catch (_: Exception) {
         ResolverStore()
       }
@@ -62,15 +63,14 @@ fun pushActiveResolverPresetToLibtailscale() {
 
 private fun setBackendModeDirect(mode: String, addrs: List<String>) {
   try {
-    val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
-    App.get().getLibtailscaleApp().setResolverMode(mode, json.encodeToString(addrs))
+    App.get().getLibtailscaleApp().setResolverMode(mode, resolverPresetsJson.encodeToString(addrs))
   } catch (e: Exception) {
     TSLog.e(TAG, "setResolverMode failed: $e")
   }
 }
 
 class ResolverPresetsViewModel : ViewModel() {
-  private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+  private val json = resolverPresetsJson
 
   private val _store = MutableStateFlow(ResolverStore())
   val store: StateFlow<ResolverStore> = _store.asStateFlow()

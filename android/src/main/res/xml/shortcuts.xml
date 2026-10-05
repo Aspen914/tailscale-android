@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="resolver_presets"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/resolver_presets_shortcut"
+        android:shortcutLongLabel="@string/resolver_presets_shortcut"
+        android:icon="@drawable/globe">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.tailscale.ipn"
+            android:targetClass="com.tailscale.ipn.MainActivity"
+            android:data="tailscale://navigate/settings/resolverPresets" />
+    </shortcut>
+</shortcuts>

@@ -30,6 +30,45 @@ import java.util.concurrent.TimeUnit
 private const val PREF_KEY_RESOLVER_PRESETS = "resolver_presets"
 private const val TAG = "ResolverPresetsVM"
 
+/**
+ * Applies the currently-active resolver preset (stored in shared prefs) to the
+ * live Tailscale backend. Safe to call from any lifecycle; cheap if nothing
+ * changed because the Go side dedupes identical selection updates.
+ */
+fun pushActiveResolverPresetToLibtailscale() {
+  val nm = com.tailscale.ipn.ui.notifier.Notifier.netmap.value ?: return
+  val userKey = nm.SelfNode.User.toString().takeIf { it.isNotBlank() } ?: return
+  val prefs = App.get().getSharedPreferences("unencrypted", Context.MODE_PRIVATE)
+  val raw = prefs.getString("resolver_presets", null) ?: "{}"
+  val store =
+      try {
+        Json { encodeDefaults = true; ignoreUnknownKeys = true }
+            .decodeFromString<ResolverStore>(raw)
+      } catch (_: Exception) {
+        ResolverStore()
+      }
+  val pd = store.profiles[userKey] ?: defaultProfileDNS()
+  when (pd.activeId) {
+    BUILTIN_TAILNET_ID -> setBackendModeDirect("tailscale", emptyList())
+    BUILTIN_SYSTEM_ID -> setBackendModeDirect("system", emptyList())
+    else -> {
+      val p = pd.custom.find { it.id == pd.activeId }
+      val addrs = p?.resolved ?: emptyList()
+      if (p == null || addrs.isEmpty()) setBackendModeDirect("tailscale", emptyList())
+      else setBackendModeDirect("custom", addrs)
+    }
+  }
+}
+
+private fun setBackendModeDirect(mode: String, addrs: List<String>) {
+  try {
+    val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+    App.get().getLibtailscaleApp().setResolverMode(mode, json.encodeToString(addrs))
+  } catch (e: Exception) {
+    TSLog.e(TAG, "setResolverMode failed: $e")
+  }
+}
+
 class ResolverPresetsViewModel : ViewModel() {
   private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 

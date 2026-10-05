@@ -351,6 +351,12 @@ func (a *App) SetResolverMode(mode string, addrsJSON string) error {
 	default:
 		return fmt.Errorf("unknown resolver mode %q", mode)
 	}
+	// Skip the wakeup if nothing actually changed, so a repeated set of the same
+	// mode does not force a full TUN teardown and re-establish.
+	prev := currentResolverSel()
+	if prev.mode == sel.mode && addrsEqual(prev.addrs, sel.addrs) {
+		return nil
+	}
 	setResolverMode(sel.mode, sel.addrs)
 	// A doorbell, not a payload: the run loop re-reads resolverSel, so a
 	// coalesced or dropped notification cannot lose an update.
@@ -359,6 +365,24 @@ func (a *App) SetResolverMode(mode string, addrsJSON string) error {
 	default:
 	}
 	return nil
+}
+
+// addrsEqual reports whether a and b contain the same addresses in any order.
+func addrsEqual(a, b []netip.Addr) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	m := make(map[netip.Addr]int, len(a))
+	for _, x := range a {
+		m[x]++
+	}
+	for _, y := range b {
+		if m[y] == 0 {
+			return false
+		}
+		m[y]--
+	}
+	return true
 }
 
 // ResolveResolverAddresses resolves target against Quad-100 and verifies the

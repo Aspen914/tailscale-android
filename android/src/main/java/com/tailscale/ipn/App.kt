@@ -40,6 +40,7 @@ import com.tailscale.ipn.util.FeatureFlags
 import com.tailscale.ipn.util.HardwareKeyStore
 import com.tailscale.ipn.util.NoSuchKeyException
 import com.tailscale.ipn.util.ShareFileHelper
+import com.tailscale.ipn.ui.viewModel.pushActiveResolverPresetToLibtailscale
 import com.tailscale.ipn.util.TSLog
 import java.io.IOException
 import java.lang.UnsupportedOperationException
@@ -243,6 +244,16 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
               KeyExpiryNotificationScheduler.schedule(this@App, self)
             }
           }
+    }
+    applicationScope.launch {
+      var lastUser: String? = null
+      com.tailscale.ipn.ui.notifier.Notifier.netmap.collect { nm ->
+        val user = nm?.SelfNode?.User?.toString()
+        if (user != null && user != lastUser) {
+          lastUser = user
+          pushActiveResolverPresetToLibtailscale()
+        }
+      }
     }
     TSLog.init(this)
     FeatureFlags.initialize(mapOf("enable_new_search" to true))

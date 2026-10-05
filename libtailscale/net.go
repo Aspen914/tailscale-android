@@ -110,6 +110,14 @@ func (b *backend) updateTUN(rcfg *router.Config, dcfg *dns.OSConfig) (err error)
 	b.logger.Logf("updateTUN: set MTU")
 	if dcfg != nil {
 		nameservers := dcfg.Nameservers
+		if addrs := currentResolverAddrs(); len(addrs) > 0 {
+			// A resolver preset is active: install its addresses in place of
+			// Quad-100, so catch-all resolution leaves the phone from here.
+			// Quad-100's own configuration is untouched, so tailscaled still
+			// resolves internally the way the tailnet asks. Search domains are
+			// left as-is below, so single-label queries still expand.
+			nameservers = addrs
+		}
 		if b.avoidEmptyDNS && len(nameservers) == 0 {
 			nameservers = googleDNSServers
 		}

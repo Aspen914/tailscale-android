@@ -267,6 +267,17 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 			// that independently of userspace engine network changes which may
 			// eliminate some unnecessary work.
 			go b.NetworkChanged(i)
+		case <-onResolverChange:
+			// The resolver preset changed. The addresses themselves are read by
+			// updateTUN from resolverAddrs; this only has to rebuild the TUN.
+			// lastCfg is nil while the tunnel is closed, and updateTUN would
+			// dereference it, so check before rebuilding. If the tunnel comes up
+			// later, the next reconfigure picks the addresses up anyway.
+			if state >= ipn.Starting && b.lastCfg != nil {
+				if err := b.updateTUN(b.lastCfg, b.lastDNSCfg); err != nil {
+					a.closeVpnService(err, b)
+				}
+			}
 		}
 	}
 }

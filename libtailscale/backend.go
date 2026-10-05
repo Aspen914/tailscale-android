@@ -268,11 +268,11 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 			// eliminate some unnecessary work.
 			go b.NetworkChanged(i)
 		case <-onResolverChange:
-			// The resolver preset changed. The addresses themselves are read by
-			// updateTUN from resolverAddrs; this only has to rebuild the TUN.
+			// The resolver mode changed. The detail itself is read by
+			// updateTUN from resolverSel; this only has to rebuild the TUN.
 			// lastCfg is nil while the tunnel is closed, and updateTUN would
 			// dereference it, so check before rebuilding. If the tunnel comes up
-			// later, the next reconfigure picks the addresses up anyway.
+			// later, the next reconfigure picks the mode up anyway.
 			if state >= ipn.Starting && b.lastCfg != nil {
 				if err := b.updateTUN(b.lastCfg, b.lastDNSCfg); err != nil {
 					a.closeVpnService(err, b)

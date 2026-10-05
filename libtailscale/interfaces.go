@@ -151,12 +151,12 @@ type Application interface {
 	// allows the watcher to stop watching notifications.
 	WatchNotifications(mask int, cb NotificationCallback) NotificationManager
 
-	// SetResolverAddresses makes the TUN install addrsJSON, a JSON array of IP
-	// literals, in place of Quad-100, so catch-all queries leave the phone for
-	// them. An empty array clears the override and restores Tailscale's own
-	// choice. The TUN is rebuilt asynchronously, so this returns once the change
-	// is recorded rather than once the rebuild finished.
-	SetResolverAddresses(addrsJSON string) error
+	// SetResolverMode installs the requested resolver behaviour into the TUN.
+	// mode is one of "tailscale", "system", or "custom". addrsJSON is consulted
+	// only for mode="custom" and must be a JSON array of IP literals. The TUN is
+	// rebuilt asynchronously, so this returns once the change is recorded rather
+	// than once the rebuild finished.
+	SetResolverMode(mode string, addrsJSON string) error
 
 	// ResolveResolverAddresses resolves target, an IP literal or an FQDN, against
 	// Quad-100 and verifies the result answers queries. cachedJSON is a JSON

@@ -109,16 +109,23 @@ func (b *backend) updateTUN(rcfg *router.Config, dcfg *dns.OSConfig) (err error)
 	}
 	b.logger.Logf("updateTUN: set MTU")
 	if dcfg != nil {
-		nameservers := dcfg.Nameservers
-		if addrs := currentResolverAddrs(); len(addrs) > 0 {
+		sel := currentResolverSel()
+		var nameservers []netip.Addr
+		switch sel.mode {
+		case modeSystem:
+			// Deliberately empty: Android falls back to the underlying network.
+			nameservers = nil
+		case modeCustom:
 			// A resolver preset is active: install its addresses in place of
 			// Quad-100, so catch-all resolution leaves the phone from here.
 			// Quad-100's own configuration is untouched, so tailscaled still
 			// resolves internally the way the tailnet asks. Search domains are
 			// left as-is below, so single-label queries still expand.
-			nameservers = addrs
+			nameservers = sel.addrs
+		default: // modeTailscale
+			nameservers = dcfg.Nameservers
 		}
-		if b.avoidEmptyDNS && len(nameservers) == 0 {
+		if sel.mode != modeSystem && b.avoidEmptyDNS && len(nameservers) == 0 {
 			nameservers = googleDNSServers
 		}
 		for _, dns := range nameservers {
@@ -126,9 +133,11 @@ func (b *backend) updateTUN(rcfg *router.Config, dcfg *dns.OSConfig) (err error)
 				return err
 			}
 		}
-		for _, dom := range dcfg.SearchDomains {
-			if err := builder.AddSearchDomain(dom.WithoutTrailingDot()); err != nil {
-				return err
+		if sel.mode != modeSystem {
+			for _, dom := range dcfg.SearchDomains {
+				if err := builder.AddSearchDomain(dom.WithoutTrailingDot()); err != nil {
+					return err
+				}
 			}
 		}
 		b.logger.Logf("updateTUN: set nameservers")

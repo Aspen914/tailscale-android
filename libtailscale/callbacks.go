@@ -24,8 +24,8 @@ var (
 	onDNSConfigChanged = make(chan string, 1)
 
 	// onResolverChange wakes the run loop to rebuild the TUN with the current
-	// resolverAddrs. It deliberately carries no payload: the loop re-reads
-	// resolverAddrs itself, so a coalesced or dropped notification can never
+	// resolverSel. It deliberately carries no payload: the loop re-reads
+	// resolverSel itself, so a coalesced or dropped notification can never
 	// apply a stale value.
 	onResolverChange = make(chan struct{}, 1)
 

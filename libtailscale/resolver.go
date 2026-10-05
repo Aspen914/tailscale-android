@@ -24,11 +24,58 @@ import (
 // OS boundary instead, leaving Quad-100's own configuration untouched. See
 // docs/adr/0001-override-device-resolvers-at-the-tun.md.
 //
-// resolverAddrs holds that override. A nil pointer or empty slice means no
-// override, in which case the TUN gets whatever tailscaled decided. It is written
-// from an Android binder goroutine and read from the runBackend loop, so it is
-// atomic rather than a plain field on backend.
-var resolverAddrs atomic.Pointer[[]netip.Addr]
+// resolverMode is why the TUN's nameserver list is being overridden.
+type resolverMode string
+
+const (
+	// modeTailscale installs the tailnet's own resolvers (dcfg.Nameservers),
+	// which is how the device behaves without any override.
+	modeTailscale resolverMode = "tailscale"
+	// modeSystem installs no nameservers at all, letting Android fall back to
+	// whatever the underlying network provides.
+	modeSystem resolverMode = "system"
+	// modeCustom installs the addresses supplied by the preset instead.
+	modeCustom resolverMode = "custom"
+)
+
+// resolverSelection is the current resolver override. The address list is only
+// consulted when mode == modeCustom.
+type resolverSelection struct {
+	mode resolverMode
+	addrs []netip.Addr
+}
+
+var resolverSel atomic.Pointer[resolverSelection]
+
+func currentResolverSel() resolverSelection {
+	if p := resolverSel.Load(); p != nil {
+		return *p
+	}
+	return resolverSelection{mode: modeTailscale}
+}
+
+func setResolverMode(mode resolverMode, addrs []netip.Addr) {
+	resolverSel.Store(&resolverSelection{mode: mode, addrs: addrs})
+}
+
+// parseResolverAddrs validates and normalises a JSON array of IP literals.
+func parseResolverAddrs(addrsJSON string) ([]netip.Addr, error) {
+	var raw []string
+	if strings.TrimSpace(addrsJSON) != "" {
+		if err := json.Unmarshal([]byte(addrsJSON), &raw); err != nil {
+			return nil, fmt.Errorf("resolver addresses are not a JSON array: %w", err)
+		}
+	}
+	parsed := make([]netip.Addr, 0, len(raw))
+	for _, s := range raw {
+		addr, err := netip.ParseAddr(strings.TrimSpace(s))
+		if err != nil {
+			return nil, fmt.Errorf("resolver address %q is not an IP address: %w", s, err)
+		}
+		parsed = append(parsed, addr.Unmap())
+	}
+	return parsed, nil
+}
 
 // defaultResolveTimeout bounds a resolve or a probe when the caller does not say.
 const defaultResolveTimeout = 2 * time.Second
@@ -37,30 +84,6 @@ const defaultResolveTimeout = 2 * time.Second
 // to be a name any resolver can answer, so that "unreachable" and "configured but
 // broken" are told apart rather than both looking like NXDOMAIN.
 const probeName = "example.com."
-
-// setResolverAddrs records the resolver addresses to install into the TUN. An empty
-// addrs clears the override. It reports an error and changes nothing if any address
-// fails to parse, so a bad value cannot half-apply.
-func setResolverAddrs(addrs []string) error {
-	parsed := make([]netip.Addr, 0, len(addrs))
-	for _, s := range addrs {
-		addr, err := netip.ParseAddr(strings.TrimSpace(s))
-		if err != nil {
-			return fmt.Errorf("resolver address %q is not an IP address: %w", s, err)
-		}
-		parsed = append(parsed, addr.Unmap())
-	}
-	resolverAddrs.Store(&parsed)
-	return nil
-}
-
-// currentResolverAddrs returns the resolver override, or nil if none is active.
-func currentResolverAddrs() []netip.Addr {
-	if p := resolverAddrs.Load(); p != nil {
-		return *p
-	}
-	return nil
-}
 
 // resolveResolverAddresses resolves target against Quad-100 and verifies the
 // result answers queries, returning the literals to install into the TUN.
@@ -304,24 +327,32 @@ func dnsFQDN(name string) (string, bool) {
 	return name + ".", true
 }
 
-// SetResolverAddresses makes the TUN install addrsJSON, a JSON array of IP
-// literals, in place of Quad-100, so that catch-all queries leave the phone for
-// them. An empty array clears the override and restores Tailscale's own choice.
+// SetResolverMode makes the TUN install the requested resolver behaviour,
+// taking effect asynchronously.
 //
-// The TUN is rebuilt asynchronously, so this returns once the change is recorded
-// rather than once the rebuild finished. Passing the addresses as JSON follows
-// GetInterfacesAsJson: gobind supports scalars and []byte, not []string.
-func (a *App) SetResolverAddresses(addrsJSON string) error {
-	var addrs []string
-	if strings.TrimSpace(addrsJSON) != "" {
-		if err := json.Unmarshal([]byte(addrsJSON), &addrs); err != nil {
-			return fmt.Errorf("resolver addresses are not a JSON array: %w", err)
+//   mode="tailscale": install the tailnet's own resolvers (dcfg.Nameservers).
+//   mode="system":    install no nameservers; Android falls back to the OS.
+//   mode="custom":    install addrsJSON, a JSON array of IP literals.
+//
+// The TUN is rebuilt after this returns, so the call itself only records the new
+// selection. JSON strings follow GetInterfacesAsJson: gobind supports scalars and
+// []byte, not []string.
+func (a *App) SetResolverMode(mode string, addrsJSON string) error {
+	sel := resolverSelection{mode: resolverMode(strings.TrimSpace(mode))}
+	switch sel.mode {
+	case modeTailscale, modeSystem:
+		// no address list needed
+	case modeCustom:
+		parsed, err := parseResolverAddrs(addrsJSON)
+		if err != nil {
+			return err
 		}
+		sel.addrs = parsed
+	default:
+		return fmt.Errorf("unknown resolver mode %q", mode)
 	}
-	if err := setResolverAddrs(addrs); err != nil {
-		return err
-	}
-	// A doorbell, not a payload: the run loop re-reads resolverAddrs, so a
+	setResolverMode(sel.mode, sel.addrs)
+	// A doorbell, not a payload: the run loop re-reads resolverSel, so a
 	// coalesced or dropped notification cannot lose an update.
 	select {
 	case onResolverChange <- struct{}{}:

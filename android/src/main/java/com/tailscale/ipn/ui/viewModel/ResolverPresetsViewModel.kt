@@ -142,25 +142,33 @@ class ResolverPresetsViewModel : ViewModel() {
     val key = profileKey.value
     val pd = if (key == null) defaultProfileDNS() else (_store.value.profiles[key] ?: defaultProfileDNS())
     when (pd.activeId) {
-      BUILTIN_SYSTEM_ID -> {
-        setBackendAddrs("[]")
-      }
       BUILTIN_TAILNET_ID -> {
-        setBackendAddrs("[]")
+        setBackendMode("tailscale", emptyList())
+      }
+      BUILTIN_SYSTEM_ID -> {
+        setBackendMode("system", emptyList())
       }
       else -> {
         val p = pd.custom.find { it.id == pd.activeId }
         val addrs = p?.resolved ?: emptyList()
-        setBackendAddrs(json.encodeToString(addrs))
+        // A custom preset that has never been resolved has nothing to install:
+        // fall back to the tailnet's resolvers rather than pointing the TUN at
+        // no nameservers.
+        if (p == null || addrs.isEmpty()) {
+          setBackendMode("tailscale", emptyList())
+        } else {
+          setBackendMode("custom", addrs)
+        }
       }
     }
   }
 
-  private fun setBackendAddrs(jsonAddrs: String) {
+  private fun setBackendMode(mode: String, addrs: List<String>) {
     try {
-      App.get().getLibtailscaleApp().setResolverAddresses(jsonAddrs)
+      val jsonAddrs = json.encodeToString(addrs)
+      App.get().getLibtailscaleApp().setResolverMode(mode, jsonAddrs)
     } catch (e: Exception) {
-      TSLog.e(TAG, "setResolverAddresses failed: $e")
+      TSLog.e(TAG, "setResolverMode failed: $e")
     }
   }
 

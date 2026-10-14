@@ -409,5 +409,6 @@
     <string name="using_custom_dns">Using custom resolver</string>
     <string name="resolver_tile_label">DNS resolver</string>
     <string name="resolver_widget_label">DNS resolver</string>
+    <string name="resolver_widget_description">Shows the active DNS resolver preset. Tap to switch to the next one.</string>
     <string name="resolver_presets_shortcut">Resolver presets</string>
 </resources>

@@ -117,9 +117,8 @@ type backend struct {
 
 	appCtx AppContext
 
-	resolverMu          sync.Mutex
-	lastBaseResolverCfg *resolver.Config
-	updatingResolver    bool
+	lastBaseResolverCfg atomic.Pointer[resolver.Config]
+	updatingResolver    atomic.Bool
 }
 
 type settingsFunc func(*router.Config, *dns.OSConfig) error
@@ -434,10 +433,8 @@ func (b *backend) initResolverHook() {
 		return
 	}
 	r.TestOnlySetHook(func(cfg resolver.Config) {
-		b.resolverMu.Lock()
-		defer b.resolverMu.Unlock()
-		if !b.updatingResolver {
-			b.lastBaseResolverCfg = cloneResolverConfig(cfg)
+		if !b.updatingResolver.Load() {
+			b.lastBaseResolverCfg.Store(cloneResolverConfig(cfg))
 		}
 		sel := currentResolverSel()
 		if sel.mode == modeCustom && len(sel.addrs) > 0 {
@@ -457,8 +454,6 @@ func (b *backend) initResolverHook() {
 }
 
 func (b *backend) applyResolverSelection(sel resolverSelection) {
-	b.resolverMu.Lock()
-	defer b.resolverMu.Unlock()
 	if b.sys == nil {
 		return
 	}
@@ -470,11 +465,12 @@ func (b *backend) applyResolverSelection(sel resolverSelection) {
 	if r == nil {
 		return
 	}
-	if b.lastBaseResolverCfg == nil {
+	base := b.lastBaseResolverCfg.Load()
+	if base == nil {
 		go dm.RecompileDNSConfig()
 		return
 	}
-	cfg := cloneResolverConfig(*b.lastBaseResolverCfg)
+	cfg := cloneResolverConfig(*base)
 	if sel.mode == modeCustom && len(sel.addrs) > 0 {
 		var resolvers []*dnstype.Resolver
 		for _, addr := range sel.addrs {
@@ -488,9 +484,9 @@ func (b *backend) applyResolverSelection(sel resolverSelection) {
 		}
 		cfg.Routes["."] = resolvers
 	}
-	b.updatingResolver = true
+	b.updatingResolver.Store(true)
 	_ = r.SetConfig(*cfg)
-	b.updatingResolver = false
+	b.updatingResolver.Store(false)
 }
 
 func (a *App) watchFileOpsChanges() {

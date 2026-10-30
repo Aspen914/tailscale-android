@@ -16,6 +16,7 @@ import com.tailscale.ipn.ui.model.builtInPresets
 import com.tailscale.ipn.ui.model.defaultProfileDNS
 import com.tailscale.ipn.util.TSLog
 import android.content.Context
+import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,7 +84,19 @@ class ResolverPresetsViewModel : ViewModel() {
 
   private val profileKey = MutableStateFlow<String?>(null)
 
+  private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+    if (key == null || key == PREF_KEY_RESOLVER_PRESETS) {
+      loadStore()
+    }
+  }
+
   init {
+    try {
+      App.get()
+          .getSharedPreferences("unencrypted", Context.MODE_PRIVATE)
+          .registerOnSharedPreferenceChangeListener(prefsListener)
+    } catch (_: Exception) {
+    }
     viewModelScope.launch {
       Notifier.netmap
           .filterNotNull()
@@ -163,17 +176,16 @@ class ResolverPresetsViewModel : ViewModel() {
   }
 
   private fun saveStore() {
-    viewModelScope.launch {
-      _saving.value = true
-      try {
-        val prefs = App.get().getSharedPreferences("unencrypted", Context.MODE_PRIVATE)
-        val raw = json.encodeToString(_store.value)
-        prefs.edit().putString(PREF_KEY_RESOLVER_PRESETS, raw).commit()
-      } catch (e: Exception) {
-        TSLog.e(TAG, "Failed to save resolver store: $e")
-      } finally {
-        _saving.value = false
-      }
+    _saving.value = true
+    try {
+      val prefs = App.get().getSharedPreferences("unencrypted", Context.MODE_PRIVATE)
+      val raw = json.encodeToString(_store.value)
+      prefs.edit().putString(PREF_KEY_RESOLVER_PRESETS, raw).commit()
+    } catch (e: Exception) {
+      TSLog.e(TAG, "Failed to save resolver store: $e")
+    } finally {
+      _saving.value = false
+      ResolverPresetsState.refreshWidgets()
     }
   }
 
@@ -209,6 +221,16 @@ class ResolverPresetsViewModel : ViewModel() {
     } catch (e: Exception) {
       TSLog.e(TAG, "setResolverMode failed: $e")
     }
+  }
+
+  override fun onCleared() {
+    try {
+      App.get()
+          .getSharedPreferences("unencrypted", Context.MODE_PRIVATE)
+          .unregisterOnSharedPreferenceChangeListener(prefsListener)
+    } catch (_: Exception) {
+    }
+    super.onCleared()
   }
 
   fun probeTarget(target: String, cached: List<String>) {

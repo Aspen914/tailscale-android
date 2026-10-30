@@ -5,6 +5,7 @@ package com.tailscale.ipn.ui.viewModel
 
 import android.content.Context
 import com.tailscale.ipn.App
+import com.tailscale.ipn.ResolverWidgetProvider
 import com.tailscale.ipn.ui.model.BUILTIN_SYSTEM_ID
 import com.tailscale.ipn.ui.model.BUILTIN_TAILNET_ID
 import com.tailscale.ipn.ui.model.ResolverStore
@@ -23,7 +24,7 @@ object ResolverPresetsState {
 
   private fun currentProfileKey(): String? {
     val user = Notifier.netmap.value?.SelfNode?.User?.toString()
-    return user?.takeIf { it.isNotBlank() }
+    return user?.takeIf { it.isNotBlank() } ?: App.get().lastProfileUser()
   }
 
   fun loadStore(): ResolverStore {
@@ -63,7 +64,25 @@ object ResolverPresetsState {
     val pd = s.profiles[key] ?: defaultProfileDNS()
     saveStore(s.copy(profiles = s.profiles + (key to pd.copy(activeId = id))))
     pushActiveResolverPresetToLibtailscale()
+    refreshWidgets()
   }
+
+  /** Ask the launcher to re-render every placed resolver widget. */
+  @JvmStatic
+  fun refreshWidgets() {
+    try {
+      ResolverWidgetProvider.updateAll(App.get())
+    } catch (_: Exception) {
+    }
+  }
+
+  /** Alias kept for callers that prefer an "update" verb. */
+  @JvmStatic
+  fun updateWidgets() = refreshWidgets()
+
+  /** Alias matching the AppWidgetProvider's entry point. */
+  @JvmStatic
+  fun updateAllWidgets() = refreshWidgets()
 
   /** Cycles through built-in presets and then each custom preset, in definition order. */
   fun cycle() {

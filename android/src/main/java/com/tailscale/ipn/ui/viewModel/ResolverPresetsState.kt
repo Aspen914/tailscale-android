@@ -65,6 +65,10 @@ object ResolverPresetsState {
     saveStore(s.copy(profiles = s.profiles + (key to pd.copy(activeId = id))))
     pushActiveResolverPresetToLibtailscale()
     refreshWidgets()
+    try {
+      App.get().updateStatusNotification()
+    } catch (_: Exception) {
+    }
   }
 
   /** Ask the launcher to re-render every placed resolver widget. */

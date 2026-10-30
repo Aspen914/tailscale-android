@@ -35,11 +35,12 @@ import com.tailscale.ipn.ui.notifier.HealthNotifier
 import com.tailscale.ipn.ui.notifier.Notifier
 import com.tailscale.ipn.ui.viewModel.AppViewModel
 import com.tailscale.ipn.ui.viewModel.AppViewModelFactory
+import com.tailscale.ipn.ui.viewModel.ResolverPresetsState
+import com.tailscale.ipn.ui.viewModel.pushActiveResolverPresetToLibtailscale
 import com.tailscale.ipn.util.FeatureFlags
 import com.tailscale.ipn.util.HardwareKeyStore
 import com.tailscale.ipn.util.NoSuchKeyException
 import com.tailscale.ipn.util.ShareFileHelper
-import com.tailscale.ipn.ui.viewModel.pushActiveResolverPresetToLibtailscale
 import com.tailscale.ipn.util.TSLog
 import java.io.IOException
 import java.lang.UnsupportedOperationException
@@ -221,6 +222,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
                     vpnRunning = true,
                     hideDisconnectAction = hideDisconnectAction.value,
                     exitNodeName = exitNodeName,
+                    dnsResolverName = ResolverPresetsState.currentLabel(),
                 )
               }
             }
@@ -738,12 +740,20 @@ open class UninitializedApp : Application() {
     notificationManager.createNotificationChannel(channel)
   }
 
+  fun updateStatusNotification() {
+    val vpnRunning = isVpnRunning()
+    val hideDisconnectAction = MDMSettings.forceEnabled.flow.value.value
+    val exitNodeName = getExitNodeName(Notifier.prefs.value, Notifier.netmap.value)
+    notifyStatus(vpnRunning, hideDisconnectAction, exitNodeName, ResolverPresetsState.currentLabel())
+  }
+
   fun notifyStatus(
       vpnRunning: Boolean,
       hideDisconnectAction: Boolean,
       exitNodeName: String? = null,
+      dnsResolverName: String? = null,
   ) {
-    notifyStatus(buildStatusNotification(vpnRunning, hideDisconnectAction, exitNodeName))
+    notifyStatus(buildStatusNotification(vpnRunning, hideDisconnectAction, exitNodeName, dnsResolverName))
   }
 
   fun notifyStatus(notification: Notification) {
@@ -767,12 +777,26 @@ open class UninitializedApp : Application() {
       vpnRunning: Boolean,
       hideDisconnectAction: Boolean,
       exitNodeName: String? = null,
+      dnsResolverName: String? = null,
   ): Notification {
     val title = getString(if (vpnRunning) R.string.connected else R.string.not_connected)
-    val message =
-        if (vpnRunning && exitNodeName != null) {
-          getString(R.string.using_exit_node, exitNodeName)
-        } else null
+    val resolver = if (vpnRunning) (dnsResolverName ?: ResolverPresetsState.currentLabel()) else null
+    val lines = mutableListOf<String>()
+    if (vpnRunning) {
+      if (exitNodeName != null) {
+        lines.add(getString(R.string.using_exit_node, exitNodeName))
+      }
+      if (resolver != null) {
+        lines.add("DNS: $resolver")
+      }
+    }
+    val contentText = when {
+      lines.size >= 2 -> "${lines[0]} • ${lines[1]}"
+      lines.size == 1 -> lines[0]
+      else -> null
+    }
+    val bigText = if (lines.isNotEmpty()) lines.joinToString("\n") else null
+
     val icon = if (vpnRunning) R.drawable.ic_notification else R.drawable.ic_notification_disabled
     val action =
         if (vpnRunning) IPNReceiver.INTENT_DISCONNECT_VPN else IPNReceiver.INTENT_CONNECT_VPN
@@ -800,13 +824,16 @@ open class UninitializedApp : Application() {
         NotificationCompat.Builder(this, STATUS_CHANNEL_ID)
             .setSmallIcon(icon)
             .setContentTitle(title)
-            .setContentText(message)
+            .setContentText(contentText)
             .setAutoCancel(!vpnRunning)
             .setOnlyAlertOnce(!vpnRunning)
             .setOngoing(false)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
+    if (bigText != null) {
+      builder.setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+    }
     if (!vpnRunning || !hideDisconnectAction) {
       builder.addAction(
           NotificationCompat.Action.Builder(0, actionLabel, pendingButtonIntent).build()

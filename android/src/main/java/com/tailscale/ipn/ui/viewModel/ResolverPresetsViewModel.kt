@@ -186,6 +186,10 @@ class ResolverPresetsViewModel : ViewModel() {
     } finally {
       _saving.value = false
       ResolverPresetsState.refreshWidgets()
+      try {
+        App.get().updateStatusNotification()
+      } catch (_: Exception) {
+      }
     }
   }
 

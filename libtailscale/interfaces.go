@@ -250,11 +250,15 @@ type ShareFileHelper interface {
 // of various state changes.
 
 func RequestVPN(service IPNService) {
-	onVPNRequested <- service
+	go func() {
+		onVPNRequested <- service
+	}()
 }
 
 func ServiceDisconnect(service IPNService) {
-	onDisconnect <- service
+	go func() {
+		onDisconnect <- service
+	}()
 }
 
 func SendLog(logstr []byte) {

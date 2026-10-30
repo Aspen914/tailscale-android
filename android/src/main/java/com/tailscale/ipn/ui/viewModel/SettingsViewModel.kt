@@ -17,6 +17,7 @@ data class SettingsNav(
     val onNavigateToBugReport: () -> Unit,
     val onNavigateToAbout: () -> Unit,
     val onNavigateToDNSSettings: () -> Unit,
+    val onNavigateToResolverPresets: () -> Unit = {},
     val onNavigateToSplitTunneling: () -> Unit,
     val onNavigateToTailnetLock: () -> Unit,
     val onNavigateToSubnetRouting: () -> Unit,

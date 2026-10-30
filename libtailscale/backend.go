@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -27,13 +28,16 @@ import (
 	"tailscale.com/ipn/localapi"
 	"tailscale.com/logtail"
 	"tailscale.com/net/dns"
+	"tailscale.com/net/dns/resolver"
 	"tailscale.com/net/netmon"
 	"tailscale.com/net/netns"
 	"tailscale.com/net/tsdial"
 	"tailscale.com/paths"
 	"tailscale.com/tsd"
+	"tailscale.com/types/dnstype"
 	"tailscale.com/types/logger"
 	"tailscale.com/types/logid"
+	"tailscale.com/util/dnsname"
 	"tailscale.com/util/eventbus"
 	"tailscale.com/wgengine"
 	"tailscale.com/wgengine/netstack"
@@ -112,6 +116,9 @@ type backend struct {
 	avoidEmptyDNS bool
 
 	appCtx AppContext
+
+	lastBaseResolverCfg atomic.Pointer[resolver.Config]
+	updatingResolver    atomic.Bool
 }
 
 type settingsFunc func(*router.Config, *dns.OSConfig) error
@@ -267,6 +274,18 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 			// that independently of userspace engine network changes which may
 			// eliminate some unnecessary work.
 			go b.NetworkChanged(i)
+		case <-onResolverChange:
+			// The resolver mode or preset selection changed.
+			sel := currentResolverSel()
+			b.applyResolverSelection(sel)
+
+			// If switching to/from modeSystem, the TUN nameservers must be rebuilt.
+			// If staying between modeTailscale and modeCustom, updateTUN updates cleanly if needed.
+			if state >= ipn.Starting && b.lastCfg != nil {
+				if err := b.updateTUN(b.lastCfg, b.lastDNSCfg); err != nil {
+					a.closeVpnService(err, b)
+				}
+			}
 		}
 	}
 }
@@ -378,6 +397,7 @@ func (a *App) newBackend(dataDir string, appCtx AppContext, store *stateStore,
 	b.engine = engine
 	b.backend = lb
 	b.sys = sys
+	b.initResolverHook()
 	go func() {
 		err := lb.Start(ipn.Options{})
 		if err != nil {
@@ -387,6 +407,86 @@ func (a *App) newBackend(dataDir string, appCtx AppContext, store *stateStore,
 		a.ready.Done()
 	}()
 	return b, nil
+}
+
+func cloneResolverConfig(cfg resolver.Config) *resolver.Config {
+	c := cfg
+	if cfg.Routes != nil {
+		c.Routes = make(map[dnsname.FQDN][]*dnstype.Resolver, len(cfg.Routes))
+		for k, v := range cfg.Routes {
+			c.Routes[k] = slices.Clone(v)
+		}
+	}
+	return &c
+}
+
+func (b *backend) initResolverHook() {
+	if b.sys == nil {
+		return
+	}
+	dm, ok := b.sys.DNSManager.GetOK()
+	if !ok || dm == nil {
+		return
+	}
+	r := dm.Resolver()
+	if r == nil {
+		return
+	}
+	r.TestOnlySetHook(func(cfg resolver.Config) {
+		if !b.updatingResolver.Load() {
+			b.lastBaseResolverCfg.Store(cloneResolverConfig(cfg))
+		}
+		sel := currentResolverSel()
+		if sel.mode == modeCustom && len(sel.addrs) > 0 {
+			var resolvers []*dnstype.Resolver
+			for _, addr := range sel.addrs {
+				resolvers = append(resolvers, &dnstype.Resolver{
+					Addr:            addr.String(),
+					UseWithExitNode: true,
+				})
+			}
+			if cfg.Routes == nil {
+				cfg.Routes = make(map[dnsname.FQDN][]*dnstype.Resolver)
+			}
+			cfg.Routes["."] = resolvers
+		}
+	})
+}
+
+func (b *backend) applyResolverSelection(sel resolverSelection) {
+	if b.sys == nil {
+		return
+	}
+	dm, ok := b.sys.DNSManager.GetOK()
+	if !ok || dm == nil {
+		return
+	}
+	r := dm.Resolver()
+	if r == nil {
+		return
+	}
+	base := b.lastBaseResolverCfg.Load()
+	if base == nil {
+		go dm.RecompileDNSConfig()
+		return
+	}
+	cfg := cloneResolverConfig(*base)
+	if sel.mode == modeCustom && len(sel.addrs) > 0 {
+		var resolvers []*dnstype.Resolver
+		for _, addr := range sel.addrs {
+			resolvers = append(resolvers, &dnstype.Resolver{
+				Addr:            addr.String(),
+				UseWithExitNode: true,
+			})
+		}
+		if cfg.Routes == nil {
+			cfg.Routes = make(map[dnsname.FQDN][]*dnstype.Resolver)
+		}
+		cfg.Routes["."] = resolvers
+	}
+	b.updatingResolver.Store(true)
+	_ = r.SetConfig(*cfg)
+	b.updatingResolver.Store(false)
 }
 
 func (a *App) watchFileOpsChanges() {

@@ -23,6 +23,12 @@ var (
 	// onDNSConfigChanged is notified when the network changes and the DNS config needs to be updated. It receives the updated interface name.
 	onDNSConfigChanged = make(chan string, 1)
 
+	// onResolverChange wakes the run loop to rebuild the TUN with the current
+	// resolverSel. It deliberately carries no payload: the loop re-reads
+	// resolverSel itself, so a coalesced or dropped notification can never
+	// apply a stale value.
+	onResolverChange = make(chan struct{}, 1)
+
 	// onLog receives Android logs to be sent to the logger
 	onLog = make(chan string, 10)
 

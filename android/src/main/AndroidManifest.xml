@@ -63,6 +63,9 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="tailscale" android:host="navigate" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
         <activity
             android:name="ShareActivity"
@@ -146,6 +149,30 @@
                 android:name="android.service.quicksettings.TOGGLEABLE_TILE"
                 android:value="true" />
         </service>
+
+        <service
+            android:name=".ResolverTileService"
+            android:exported="true"
+            android:icon="@drawable/globe"
+            android:label="@string/resolver_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".ResolverWidgetProvider"
+            android:exported="false"
+            android:label="@string/resolver_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.tailscale.ipn.RESOLVER_WIDGET_CYCLE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/appwidget_resolver" />
+        </receiver>
 
         <meta-data
             android:name="android.content.APP_RESTRICTIONS"

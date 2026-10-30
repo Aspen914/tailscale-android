@@ -39,6 +39,7 @@ import com.tailscale.ipn.util.FeatureFlags
 import com.tailscale.ipn.util.HardwareKeyStore
 import com.tailscale.ipn.util.NoSuchKeyException
 import com.tailscale.ipn.util.ShareFileHelper
+import com.tailscale.ipn.ui.viewModel.pushActiveResolverPresetToLibtailscale
 import com.tailscale.ipn.util.TSLog
 import java.io.IOException
 import java.lang.UnsupportedOperationException
@@ -213,6 +214,7 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
               val vpnRunning = state == Ipn.State.Starting || state == Ipn.State.Running
               updateConnStatus(ableToStartVPN)
               QuickToggleService.setVPNRunning(vpnRunning)
+              setVpnRunning(vpnRunning)
               // Update notification status when VPN is running
               if (vpnRunning) {
                 notifyStatus(
@@ -242,6 +244,22 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
               KeyExpiryNotificationScheduler.schedule(this@App, self)
             }
           }
+    }
+    applicationScope.launch {
+      var lastUser: String? = null
+      com.tailscale.ipn.ui.notifier.Notifier.netmap.collect { nm ->
+        val user = nm?.SelfNode?.User?.toString()
+        if (user != null && user != lastUser) {
+          lastUser = user
+          setLastProfileUser(user)
+          pushActiveResolverPresetToLibtailscale()
+        }
+        // Keep the home-screen widget in sync with the active profile/preset.
+        try {
+          ResolverWidgetProvider.updateAll(this@App)
+        } catch (_: Exception) {
+        }
+      }
     }
     TSLog.init(this)
     FeatureFlags.initialize(mapOf("enable_new_search" to true))
@@ -564,6 +582,11 @@ open class UninitializedApp : Application() {
     // the VPN (i.e. we're logged in and machine is authorized).
     private const val ABLE_TO_START_VPN_KEY = "ableToStartVPN"
 
+    // Last-known VPN running state and the signed-in profile's key, both used by code
+    // that runs in a cold process (home-screen widget) before the backend is up.
+    private const val VPN_RUNNING_KEY = "vpnRunning"
+    private const val LAST_PROFILE_USER_KEY = "lastProfileUser"
+
     // The value is 'disallowedApps' as it used to represent
     // only disallowed applications. This has been changed
     // and allowing/disallowing is based on ALLOW_SELECTED_APPS_KEY
@@ -609,6 +632,33 @@ open class UninitializedApp : Application() {
   /** This function can be called without initializing the App. */
   fun isAbleToStartVPN(): Boolean {
     return getUnencryptedPrefs().getBoolean(ABLE_TO_START_VPN_KEY, false)
+  }
+
+  /**
+   * Remember whether the VPN is currently running, so callers that run in a cold process
+   * (e.g. the home-screen widget) can read the state without waiting on the Go backend.
+   */
+  fun setVpnRunning(running: Boolean) {
+    getUnencryptedPrefs().edit().putBoolean(VPN_RUNNING_KEY, running).apply()
+  }
+
+  /** Last-known "VPN is running" value; false before the first state update. */
+  fun isVpnRunning(): Boolean {
+    return getUnencryptedPrefs().getBoolean(VPN_RUNNING_KEY, false)
+  }
+
+  /**
+   * Remember the signed-in profile's key so resolver-preset lookups can key per-profile
+   * even in a cold process before the netmap is loaded.
+   */
+  fun setLastProfileUser(user: String?) {
+    if (user != null) {
+      getUnencryptedPrefs().edit().putString(LAST_PROFILE_USER_KEY, user).apply()
+    }
+  }
+
+  fun lastProfileUser(): String? {
+    return getUnencryptedPrefs().getString(LAST_PROFILE_USER_KEY, null)
   }
 
   private fun getUnencryptedPrefs(): SharedPreferences {

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Widget colors live outside of theme attributes: RemoteViews are inflated by the
+  launcher's process, where ?android:textColor* resolves against the app theme
+  and reliably lands on near-black. Explicit light/night pairs keep the card
+  legible over any wallpaper.
+-->
+<resources>
+    <color name="widget_background">#FFFFFF</color>
+    <color name="widget_text_primary">#DE000000</color>
+    <color name="widget_text_secondary">#8C000000</color>
+    <color name="widget_ripple">#1F000000</color>
+</resources>

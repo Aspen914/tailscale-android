@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rounded card so widget text never lands directly on the wallpaper. The ripple
+     wrapper keeps tap feedback while the inner shape supplies the opaque fill. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/widget_ripple">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_background" />
+            <corners android:radius="20dp" />
+        </shape>
+    </item>
+</ripple>

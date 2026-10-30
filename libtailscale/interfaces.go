@@ -150,6 +150,20 @@ type Application interface {
 	// on every new ipn.Notify message. The returned NotificationManager
 	// allows the watcher to stop watching notifications.
 	WatchNotifications(mask int, cb NotificationCallback) NotificationManager
+
+	// SetResolverMode installs the requested resolver behaviour into the TUN.
+	// mode is one of "tailscale", "system", or "custom". addrsJSON is consulted
+	// only for mode="custom" and must be a JSON array of IP literals. The TUN is
+	// rebuilt asynchronously, so this returns once the change is recorded rather
+	// than once the rebuild finished.
+	SetResolverMode(mode string, addrsJSON string) error
+
+	// ResolveResolverAddresses resolves target, an IP literal or an FQDN, against
+	// Quad-100 and verifies the result answers queries. cachedJSON is a JSON
+	// array of literals from a previous save, which is probed first so a changed
+	// address heals without a resolution. Returns a JSON array of the literals to
+	// install, or an error naming which step failed.
+	ResolveResolverAddresses(target string, cachedJSON string, timeoutMillis int) (string, error)
 }
 
 // FileParts is an array of multiple FileParts.

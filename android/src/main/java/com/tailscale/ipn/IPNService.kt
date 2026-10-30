@@ -12,6 +12,7 @@ import android.system.OsConstants
 import com.tailscale.ipn.mdm.MDMSettings
 import com.tailscale.ipn.ui.model.Ipn
 import com.tailscale.ipn.ui.notifier.Notifier
+import com.tailscale.ipn.ui.viewModel.ResolverPresetsState
 import com.tailscale.ipn.util.TSLog
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -81,7 +82,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
             val hideDisconnectAction = MDMSettings.forceEnabled.flow.first()
             val exitNodeName =
                 UninitializedApp.getExitNodeName(Notifier.prefs.value, Notifier.netmap.value)
-            app.notifyStatus(true, hideDisconnectAction.value, exitNodeName)
+            app.notifyStatus(true, hideDisconnectAction.value, exitNodeName, ResolverPresetsState.currentLabel())
           }
           app.setWantRunning(true)
           Libtailscale.requestVPN(this)
@@ -153,7 +154,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     try {
       startForeground(
           UninitializedApp.STATUS_NOTIFICATION_ID,
-          UninitializedApp.get().buildStatusNotification(true, hideDisconnectAction, exitNodeName),
+          UninitializedApp.get().buildStatusNotification(true, hideDisconnectAction, exitNodeName, ResolverPresetsState.currentLabel()),
       )
     } catch (e: Exception) {
       TSLog.e(TAG, "Failed to start foreground service: $e")

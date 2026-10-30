@@ -119,6 +119,7 @@ type backend struct {
 
 	lastBaseResolverCfg atomic.Pointer[resolver.Config]
 	updatingResolver    atomic.Bool
+	lastAppliedMode     resolverMode
 }
 
 type settingsFunc func(*router.Config, *dns.OSConfig) error
@@ -277,11 +278,18 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 		case <-onResolverChange:
 			// The resolver mode or preset selection changed.
 			sel := currentResolverSel()
+			oldMode := b.lastAppliedMode
+			b.lastAppliedMode = sel.mode
 			b.applyResolverSelection(sel)
 
-			// If switching to/from modeSystem, the TUN nameservers must be rebuilt.
-			// If staying between modeTailscale and modeCustom, updateTUN updates cleanly if needed.
-			if state >= ipn.Starting && b.lastCfg != nil {
+			// The TUN nameservers only need rebuilding if switching to/from modeSystem
+			// (where Android VpnService.Builder has no nameservers instead of Quad-100).
+			// Between modeTailscale and modeCustom, Android's VpnService always uses Quad-100,
+			// and tsdns.Resolver routes queries in-memory. Re-calling updateTUN tears down
+			// tun0 and destroys the active VPN interface unnecessarily.
+			needsTUNRebuild := (oldMode == modeSystem && sel.mode != modeSystem) ||
+				(oldMode != modeSystem && sel.mode == modeSystem)
+			if needsTUNRebuild && state >= ipn.Starting && vpnService.service != nil && b.lastCfg != nil {
 				if err := b.updateTUN(b.lastCfg, b.lastDNSCfg); err != nil {
 					a.closeVpnService(err, b)
 				}
@@ -314,10 +322,11 @@ func (a *App) newBackend(dataDir string, appCtx AppContext, store *stateStore,
 
 	logf := logger.Logf(log.Printf)
 	b := &backend{
-		devices:  newTUNDevices(),
-		settings: settings,
-		appCtx:   appCtx,
-		bus:      sys.Bus.Get(),
+		devices:         newTUNDevices(),
+		settings:        settings,
+		appCtx:          appCtx,
+		bus:             sys.Bus.Get(),
+		lastAppliedMode: currentResolverSel().mode,
 	}
 
 	var logID logid.PrivateID
@@ -435,20 +444,10 @@ func (b *backend) initResolverHook() {
 	r.TestOnlySetHook(func(cfg resolver.Config) {
 		if !b.updatingResolver.Load() {
 			b.lastBaseResolverCfg.Store(cloneResolverConfig(cfg))
-		}
-		sel := currentResolverSel()
-		if sel.mode == modeCustom && len(sel.addrs) > 0 {
-			var resolvers []*dnstype.Resolver
-			for _, addr := range sel.addrs {
-				resolvers = append(resolvers, &dnstype.Resolver{
-					Addr:            addr.String(),
-					UseWithExitNode: true,
-				})
+			sel := currentResolverSel()
+			if sel.mode == modeCustom && len(sel.addrs) > 0 {
+				go b.applyResolverSelection(sel)
 			}
-			if cfg.Routes == nil {
-				cfg.Routes = make(map[dnsname.FQDN][]*dnstype.Resolver)
-			}
-			cfg.Routes["."] = resolvers
 		}
 	})
 }
@@ -514,15 +513,19 @@ func (a *App) closeVpnService(err error, b *backend) {
 	mp.WantRunning = false
 	mp.WantRunningSet = true
 
-	if _, localApiErr := a.EditPrefs(*mp); localApiErr != nil {
-		log.Printf("localapi edit prefs error %v", localApiErr)
-	}
+	go func() {
+		if _, localApiErr := a.EditPrefs(*mp); localApiErr != nil {
+			log.Printf("localapi edit prefs error %v", localApiErr)
+		}
+	}()
 
 	if b.devices.Down() {
 		log.Printf("tunnel brought down on VPN service error: %v", err)
 	}
 	b.CloseTUNs()
 
-	vpnService.service.DisconnectVPN()
-	vpnService.service = nil
+	if vpnService.service != nil {
+		vpnService.service.DisconnectVPN()
+		vpnService.service = nil
+	}
 }

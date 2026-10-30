@@ -13,18 +13,19 @@ import (
 	"net/netip"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 	"tailscale.com/net/tsaddr"
 )
 
-// The TUN normally hands Android Quad-100 and lets it forward catch-all queries to
-// the tailnet's default resolvers. A resolver preset replaces those addresses at the
-// OS boundary instead, leaving Quad-100's own configuration untouched. See
-// docs/adr/0001-override-device-resolvers-at-the-tun.md.
+// The TUN hands Android Quad-100 so all DNS queries route into the tunnel.
+// In modeCustom, Quad-100's default forwarder route is overridden with the preset's
+// addresses, ensuring MagicDNS queries are answered directly by Quad-100 while
+// all catch-all queries route to the selected preset via protected sockets.
 //
-// resolverMode is why the TUN's nameserver list is being overridden.
+// resolverMode represents the active resolver behavior.
 type resolverMode string
 
 const (
@@ -269,6 +270,13 @@ func exchangeUDP(server netip.Addr, buf []byte, id uint16, timeout time.Duration
 	defer cancel()
 
 	var d net.Dialer
+	d.Control = func(network, address string, c syscall.RawConn) error {
+		return c.Control(func(fd uintptr) {
+			if vpnService.service != nil {
+				vpnService.service.Protect(int32(fd))
+			}
+		})
+	}
 	conn, err := d.DialContext(ctx, "udp", netip.AddrPortFrom(server, 53).String())
 	if err != nil {
 		return dnsmessage.Header{}, nil, err

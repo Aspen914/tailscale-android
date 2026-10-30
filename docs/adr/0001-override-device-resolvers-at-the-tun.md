@@ -1,34 +1,29 @@
-# Override this device's resolvers at the TUN, not inside Quad-100
+# Route custom resolvers through Quad-100 to preserve MagicDNS and prevent native fallback
 
-Tailscale for Android points Android at Quad-100 (`100.100.100.100`), a forwarder that
-runs inside the tunnel. Quad-100 answers MagicDNS locally and forwards everything else to
-the *tailnet default resolvers* — but that catch-all route is assigned inside
-`tailscale.com`'s `net/dns/manager.go`, which this repository does not own. `libtailscale`
-only consumes the finished `dns.OSConfig`. So there is no seam in Kotlin for reordering what
-a single device forwards to, and `ipn.Prefs` has no field for it either: `CorpDNS` is a
-boolean and nothing more.
+Tailscale for Android points Android at Quad-100 (`100.100.100.100` / `fd7a:115c:a1e0::53`),
+a forwarder that runs inside the tunnel. Quad-100 answers MagicDNS queries locally and
+forwards everything else to the tailnet default resolvers.
 
-Rather than fork `tailscale.com` with a `go.mod` replace directive, the *resolver preset*
-replaces Quad-100 at the OS boundary: `libtailscale`'s `updateTUN` installs the preset's
-addresses in place of `dcfg.Nameservers`. Quad-100's own configuration is left alone.
+Initially, ADR 0001 attempted to replace Quad-100 with the custom preset's resolvers directly
+at the TUN boundary (`builder.AddDNSServer`). However, when non-tailnet resolvers (such as
+`1.1.1.1` or public DNS) are installed at the TUN boundary on Android, Android detects that
+the VPN does not have routes for those resolvers (in split-tunnel mode) and silently falls
+back to the underlying physical network's native resolvers. This causes MagicDNS (`*.ts.net`)
+to stop resolving completely and leaks queries outside the tunnel.
 
-Consequences worth knowing:
+To guarantee that MagicDNS works reliably and prevent Android from falling back to native
+resolvers, the TUN continues to install Quad-100 into Android's `VpnService.Builder`.
+Instead of replacing Quad-100 at the OS boundary, `libtailscale` intercepts the resolver
+configuration in `tailscale.com/net/dns/resolver.Resolver`:
+- The default catch-all route `.` in Quad-100 is pointed at the preset's addresses (`sel.addrs`).
+- MagicDNS queries (`*.ts.net`) are resolved authoritatively and locally by Quad-100.
+- All non-MagicDNS queries are forwarded by Quad-100 to the preset's addresses via protected
+  sockets using Tailscale's `tsdial.Dialer`.
+- Single-label search domains (`dcfg.SearchDomains`) remain installed in `VpnService.Builder`.
 
-- In a custom preset, Android never contacts Quad-100. The chosen resolver is solely
-  responsible for tailnet names, so it must forward `*.tailnet.ts.net` somewhere that
-  answers — a Pi-hole does this by forwarding to `100.100.100.100` on its own tailnet
-  interface. Search domains are still installed, so single-label queries still expand.
-- The device ends up with two resolution paths: `tailscaled`'s internal catch-all still
-  points at the tailnet resolvers, while the phone's queries go to the preset.
-- `Prefs.CorpDNS` becomes a derived value of the active preset rather than an independent
-  setting, which is why the preset list is the only control surface.
-- Presets store the user-facing name (IP literal, MagicDNS short name, or FQDN) and a
-  cached list of resolved literals. The cache is refreshed when a preset is saved, and
-  re-resolved at switch time only if a probe against the cached addresses fails, so a
-  changed address heals without making the common switch path depend on a lookup.
-
-Rejected: forking `tailscale.com` (upgrade drift for a per-device setting);
-a separate DNS-only `VpnService` app (Android runs one VPN per user, and a Pi-hole reached
-over Tailscale needs Tailscale's tunnel); Android Private DNS (it overrides the VPN's
-resolver entirely, breaking MagicDNS unless the chosen server can resolve tailnet names,
-and it breaks RCS and visual voicemail).
+Consequences:
+- Android remains pinned to Quad-100 inside the VPN tunnel, eliminating native resolver fallbacks.
+- MagicDNS always resolves without requiring the custom preset to forward back to Tailscale.
+- Custom presets (e.g., ad blockers, NextDNS, local Pi-holes, or public DNS) receive all catch-all
+  traffic via protected sockets, working seamlessly with or without exit nodes.
+- Presets store the user-facing name and a cached list of resolved literals.

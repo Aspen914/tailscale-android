@@ -19,6 +19,7 @@ DOCKER_IMAGE := tailscale-android-build-amd64-20260912-1
 # tailscale-android-integration-amd64-YYYYMMDD-N
 ANDROID_INTEGRATION_DOCKER_IMAGE := tailscale-android-integration-amd64-20260912-1
 export TS_USE_TOOLCHAIN=1
+export GOFLAGS := -buildvcs=false
 
 # If set, additional comma-separated build tags passed to the libtailscale Go
 # build to control feature selection.

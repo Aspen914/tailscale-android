@@ -17,6 +17,7 @@ import (
 	"github.com/tailscale/wireguard-go/tun"
 	"tailscale.com/net/dns"
 	"tailscale.com/net/netmon"
+	"tailscale.com/net/tsaddr"
 	"tailscale.com/util/dnsname"
 	"tailscale.com/wgengine/router"
 )
@@ -115,15 +116,15 @@ func (b *backend) updateTUN(rcfg *router.Config, dcfg *dns.OSConfig) (err error)
 		case modeSystem:
 			// Deliberately empty: Android falls back to the underlying network.
 			nameservers = nil
-		case modeCustom:
-			// A resolver preset is active: install its addresses in place of
-			// Quad-100, so catch-all resolution leaves the phone from here.
-			// Quad-100's own configuration is untouched, so tailscaled still
-			// resolves internally the way the tailnet asks. Search domains are
-			// left as-is below, so single-label queries still expand.
-			nameservers = sel.addrs
-		default: // modeTailscale
+		default: // modeTailscale, modeCustom
+			// Android is always configured with Quad-100 inside the VPN.
+			// In modeCustom, Quad-100's default forwarder route is overridden
+			// with the preset's addresses in tsdns.Resolver, keeping MagicDNS
+			// fully functional and preventing Android from falling back to native resolvers.
 			nameservers = dcfg.Nameservers
+			if len(nameservers) == 0 && sel.mode == modeCustom {
+				nameservers = []netip.Addr{tsaddr.TailscaleServiceIP(), tsaddr.TailscaleServiceIPv6()}
+			}
 		}
 		if sel.mode != modeSystem && b.avoidEmptyDNS && len(nameservers) == 0 {
 			nameservers = googleDNSServers

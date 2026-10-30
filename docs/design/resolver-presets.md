@@ -53,13 +53,13 @@ Two are built in and cannot be edited, reordered, or removed:
 | --- | --- | --- |
 | **Use Tailscale DNS settings** | `dcfg.Nameservers` (Quad-100) | `true` |
 | **Use system resolver** | nothing — Android resolves | `false` |
-| *custom* | the preset's resolved literals | `true` |
+| *custom* | Quad-100 (overrides Quad-100 default route) | `true` |
 
 The invariant is `CorpDNS == (activePreset != "Use system resolver")`. The existing
 `CorpDNS` switch in `DNSSettingsView.kt` is removed so the two cannot disagree. A custom
-preset leaves MagicDNS switched off at the OS boundary, because Android is pointed at the
-preset and never asks Quad-100; tailnet names resolve because the preset is expected to
-forward them (a Pi-hole forwards `*.tailnet.ts.net` to `100.100.100.100`).
+preset keeps Android pinned to Quad-100 inside the VPN tunnel, preserving MagicDNS for
+tailnet names while forwarding non-tailnet queries to the preset's addresses via protected
+sockets.
 
 `MDMSettings.useTailscaleDNSSettings != UserDecides` makes the whole list read-only, which
 is what that setting does today to the one switch.

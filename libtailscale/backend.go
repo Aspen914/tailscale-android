@@ -6,7 +6,6 @@ package libtailscale
 import (
 	"context"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -199,27 +198,24 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 		select {
 		case s := <-stateCh:
 			state = s
-			if state >= ipn.Starting && vpnService.service != nil && b.isConfigNonNilAndDifferent(cfg.rcfg, cfg.dcfg) {
-				// On state change, check if there are router or config changes requiring an update to VPNBuilder
-				if err := b.updateTUN(cfg.rcfg, cfg.dcfg); err != nil {
-					if errors.Is(err, errMultipleUsers) {
-						// TODO: surface error to user
+			if state >= ipn.Starting && vpnService.service != nil && cfg.rcfg != nil {
+				if b.lastCfg == nil || b.devices.IsDown() || b.isConfigNonNilAndDifferent(cfg.rcfg, cfg.dcfg) {
+					// On state change, check if there are router or config changes requiring an update to VPNBuilder
+					if err := b.updateTUN(cfg.rcfg, cfg.dcfg); err != nil {
+						log.Printf("updateTUN on state change (%v): %v", state, err)
+						vpnService.service.UpdateVpnStatus(false)
 					}
-					a.closeVpnService(err, b)
 				}
 			}
 		case c := <-configs:
 			cfg = c
-			if vpnService.service == nil || !b.isConfigNonNilAndDifferent(cfg.rcfg, cfg.dcfg) {
+			if vpnService.service == nil || (!b.isConfigNonNilAndDifferent(cfg.rcfg, cfg.dcfg) && b.lastCfg != nil && !b.devices.IsDown()) {
 				configErrs <- nil
 				break
 			}
 			configErrs <- b.updateTUN(cfg.rcfg, cfg.dcfg)
 		case s := <-onVPNRequested:
-			if vpnService.service != nil && vpnService.service.ID() == s.ID() {
-				// Still the same VPN instance, do nothing
-				break
-			}
+			vpnService.service = s
 			netns.SetAndroidProtectFunc(func(fd int) error {
 				if !s.Protect(int32(fd)) {
 					// TODO(bradfitz): return an error back up to netns if this fails, once
@@ -251,11 +247,12 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 			// See https://github.com/tailscale/corp/issues/13814
 			b.backend.DebugRebind()
 
-			vpnService.service = s
-
-			if state >= ipn.Starting && b.isConfigNonNilAndDifferent(cfg.rcfg, cfg.dcfg) {
-				if err := b.updateTUN(cfg.rcfg, cfg.dcfg); err != nil {
-					a.closeVpnService(err, b)
+			if state >= ipn.Starting && cfg.rcfg != nil {
+				if b.lastCfg == nil || b.devices.IsDown() || b.isConfigNonNilAndDifferent(cfg.rcfg, cfg.dcfg) {
+					if err := b.updateTUN(cfg.rcfg, cfg.dcfg); err != nil {
+						log.Printf("updateTUN on onVPNRequested: %v", err)
+						s.UpdateVpnStatus(false)
+					}
 				}
 			}
 		case s := <-onDisconnect:
@@ -291,7 +288,8 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 				(oldMode != modeSystem && sel.mode == modeSystem)
 			if needsTUNRebuild && state >= ipn.Starting && vpnService.service != nil && b.lastCfg != nil {
 				if err := b.updateTUN(b.lastCfg, b.lastDNSCfg); err != nil {
-					a.closeVpnService(err, b)
+					log.Printf("updateTUN on resolver change: %v", err)
+					vpnService.service.UpdateVpnStatus(false)
 				}
 			}
 		}
@@ -509,22 +507,13 @@ func (b *backend) isConfigNonNilAndDifferent(rcfg *router.Config, dcfg *dns.OSCo
 func (a *App) closeVpnService(err error, b *backend) {
 	log.Printf("VPN update failed: %v", err)
 
-	mp := new(ipn.MaskedPrefs)
-	mp.WantRunning = false
-	mp.WantRunningSet = true
-
-	go func() {
-		if _, localApiErr := a.EditPrefs(*mp); localApiErr != nil {
-			log.Printf("localapi edit prefs error %v", localApiErr)
-		}
-	}()
-
 	if b.devices.Down() {
 		log.Printf("tunnel brought down on VPN service error: %v", err)
 	}
 	b.CloseTUNs()
 
 	if vpnService.service != nil {
+		vpnService.service.UpdateVpnStatus(false)
 		vpnService.service.DisconnectVPN()
 		vpnService.service = nil
 	}

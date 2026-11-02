@@ -212,10 +212,14 @@ func (d *multiTUN) readFrom(dev *tunDevice) {
 			if err != nil {
 				select {
 				case <-dev.close:
-					stop = true
-					err = nil
 				default:
+					// Underlying Android TUN fd was closed/revoked (e.g., during network change).
+					// Do not pass this read error up to WireGuard, which would trigger
+					// device.Close() and destroy the tunnel permanently. Instead, report 0 packets
+					// and exit readFrom so multiTUN can advance to the next device.
 				}
+				stop = true
+				err = nil
 			}
 			r.reply <- ioReply{n, err}
 			if stop {
@@ -319,6 +323,13 @@ func (d *multiTUN) Down() bool {
 	close(d.downCh.Load())
 	d.down = true
 	return true
+}
+
+// IsDown reports whether the multiTUN is currently down.
+func (d *multiTUN) IsDown() bool {
+	d.downMu.Lock()
+	defer d.downMu.Unlock()
+	return d.down
 }
 
 func (d *multiTUN) File() *os.File {

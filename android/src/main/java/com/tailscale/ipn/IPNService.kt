@@ -5,6 +5,7 @@ package com.tailscale.ipn
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.net.Network
 import android.net.VpnService
 import android.os.Build
@@ -38,6 +39,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
 
   override fun onCreate() {
     super.onCreate()
+    isRunning = true
     // grab app to make sure it initializes
     app = App.get()
 
@@ -55,6 +57,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
         ACTION_STOP_VPN -> {
           app.setWantRunning(false)
           close()
+          VPNWatchdogManager.cancel(this)
           START_NOT_STICKY
         }
         ACTION_RESTART_VPN -> {
@@ -73,15 +76,19 @@ open class IPNService : VpnService(), libtailscale.IPNService {
         }
         ACTION_START_VPN -> {
           closed = false
+          isRunning = true
           showForegroundNotification()
           app.setWantRunning(true)
           Libtailscale.requestVPN(this)
+          VPNWatchdogManager.schedule(this)
           START_STICKY
         }
         "android.net.VpnService" -> {
           // This means we were started by Android due to Always On VPN.
           // We show a non-foreground notification because we weren't
           // started as a foreground service.
+          closed = false
+          isRunning = true
           scope.launch {
             // Collect the first value of hideDisconnectAction asynchronously.
             val hideDisconnectAction = MDMSettings.forceEnabled.flow.first()
@@ -91,15 +98,19 @@ open class IPNService : VpnService(), libtailscale.IPNService {
           }
           app.setWantRunning(true)
           Libtailscale.requestVPN(this)
+          VPNWatchdogManager.schedule(this)
           START_STICKY
         }
         else -> {
           // This means that we were restarted after the service was killed
           // (potentially due to OOM).
           if (UninitializedApp.get().isAbleToStartVPN()) {
+            closed = false
+            isRunning = true
             showForegroundNotification()
             App.get()
             Libtailscale.requestVPN(this)
+            VPNWatchdogManager.schedule(this)
             START_STICKY
           } else {
             START_NOT_STICKY
@@ -110,6 +121,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
   override fun close() {
     if (closed) return
     closed = true
+    isRunning = false
     Notifier.setState(Ipn.State.Stopping)
     disconnectVPN()
     Libtailscale.serviceDisconnect(this)
@@ -120,6 +132,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
   }
 
   override fun onDestroy() {
+    isRunning = false
     NetworkChangeCallback.setUnderlyingNetworkListener(null)
     close()
     updateVpnStatus(false)
@@ -157,10 +170,26 @@ open class IPNService : VpnService(), libtailscale.IPNService {
       exitNodeName: String? = null,
   ) {
     try {
-      startForeground(
-          UninitializedApp.STATUS_NOTIFICATION_ID,
-          UninitializedApp.get().buildStatusNotification(true, hideDisconnectAction, exitNodeName, ResolverPresetsState.currentLabel()),
-      )
+      val notification =
+          UninitializedApp.get()
+              .buildStatusNotification(
+                  true,
+                  hideDisconnectAction,
+                  exitNodeName,
+                  ResolverPresetsState.currentLabel(),
+              )
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        startForeground(
+            UninitializedApp.STATUS_NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED,
+        )
+      } else {
+        startForeground(
+            UninitializedApp.STATUS_NOTIFICATION_ID,
+            notification,
+        )
+      }
     } catch (e: Exception) {
       TSLog.e(TAG, "Failed to start foreground service: $e")
     }
@@ -267,6 +296,8 @@ open class IPNService : VpnService(), libtailscale.IPNService {
     const val ACTION_STOP_VPN = "com.tailscale.ipn.STOP_VPN"
     const val ACTION_RESTART_VPN = "com.tailscale.ipn.RESTART_VPN"
     const val ACTION_START_FOREGROUND_ONLY = "com.tailscale.ipn.START_FOREGROUND_ONLY"
+
+    @Volatile var isRunning: Boolean = false
   }
 }
 

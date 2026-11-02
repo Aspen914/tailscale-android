@@ -3,6 +3,7 @@
 package com.tailscale.ipn
 
 import android.Manifest
+import android.app.Activity
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationChannel
@@ -16,10 +17,16 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequest
+import androidx.work.OutOfQuotaPolicy
+import androidx.work.WorkManager
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
@@ -143,6 +150,9 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
         getString(R.string.key_expiry_channel_description),
         NotificationManagerCompat.IMPORTANCE_DEFAULT,
     )
+    if (isVpnRunning() && isAbleToStartVPN()) {
+      VPNWatchdogManager.schedule(this)
+    }
   }
 
   override fun onTerminate() {
@@ -642,6 +652,11 @@ open class UninitializedApp : Application() {
    */
   fun setVpnRunning(running: Boolean) {
     getUnencryptedPrefs().edit().putBoolean(VPN_RUNNING_KEY, running).apply()
+    if (running) {
+      VPNWatchdogManager.schedule(this)
+    } else {
+      VPNWatchdogManager.cancel(this)
+    }
   }
 
   /** Last-known "VPN is running" value; false before the first state update. */
@@ -703,10 +718,38 @@ open class UninitializedApp : Application() {
           TAG,
           "startVPN hit ForegroundServiceStartNotAllowedException: $foregroundServiceStartException",
       )
+      try {
+        val req =
+            OneTimeWorkRequest.Builder(StartVPNWorker::class.java)
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .addTag("ipn-connect-vpn")
+                .build()
+        WorkManager.getInstance(this)
+            .enqueueUniqueWork("ipn-connect-vpn", ExistingWorkPolicy.REPLACE, req)
+      } catch (workEx: Exception) {
+        TSLog.e(TAG, "Failed to enqueue fallback StartVPNWorker: $workEx")
+      }
     } catch (securityException: SecurityException) {
       TSLog.e(TAG, "startVPN hit SecurityException: $securityException")
     } catch (e: Exception) {
       TSLog.e(TAG, "startVPN hit exception: $e")
+    }
+  }
+
+  fun requestIgnoreBatteryOptimizationsIfNeeded(activity: Activity) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      try {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (powerManager != null && !powerManager.isIgnoringBatteryOptimizations(packageName)) {
+          val intent =
+              Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+              }
+          activity.startActivity(intent)
+        }
+      } catch (e: Exception) {
+        TSLog.w(TAG, "Unable to request ignore battery optimizations: $e")
+      }
     }
   }
 

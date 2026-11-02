@@ -168,6 +168,7 @@ class MainActivity : ComponentActivity() {
             TSLog.d("VpnPermission", "VPN permission granted")
             appViewModel.setVpnPrepared(true)
             App.get().startVPN()
+            App.get().requestIgnoreBatteryOptimizationsIfNeeded(this)
           } else {
             if (isAnotherVpnActive(this)) {
               TSLog.d("VpnPermission", "Another VPN is likely active")
@@ -599,6 +600,9 @@ class MainActivity : ComponentActivity() {
 
   override fun onResume() {
     super.onResume()
+    if (App.get().isVpnRunning()) {
+      App.get().requestIgnoreBatteryOptimizationsIfNeeded(this)
+    }
     val restrictionsManager =
         this.getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
     lifecycleScope.launch(Dispatchers.IO) { MDMSettings.update(App.get(), restrictionsManager) }

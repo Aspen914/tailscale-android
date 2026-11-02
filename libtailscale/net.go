@@ -223,16 +223,19 @@ func (b *backend) updateTUN(rcfg *router.Config, dcfg *dns.OSConfig) (err error)
 			vpnService.service.UpdateVpnStatus(false)
 			return errMultipleUsers
 		}
+		vpnService.service.UpdateVpnStatus(false)
 		return fmt.Errorf("VpnService.Builder.establish: %v", err)
 	}
-	log.Printf("Setting vpn activity status to true")
-	vpnService.service.UpdateVpnStatus(true)
-	b.logger.Logf("updateTUN: established VPN")
 
 	if parcelFD == nil {
 		b.logger.Logf("updateTUN: could not establish VPN because builder.Establish returned a nil ParcelFileDescriptor")
+		vpnService.service.UpdateVpnStatus(false)
 		return errVPNNotPrepared
 	}
+
+	log.Printf("Setting vpn activity status to true")
+	vpnService.service.UpdateVpnStatus(true)
+	b.logger.Logf("updateTUN: established VPN")
 
 	// detachFd.
 	tunFD, err := parcelFD.Detach()
@@ -240,6 +243,7 @@ func (b *backend) updateTUN(rcfg *router.Config, dcfg *dns.OSConfig) (err error)
 	vpnService.fd = tunFD
 
 	if err != nil {
+		vpnService.service.UpdateVpnStatus(false)
 		return fmt.Errorf("detachFd: %v", err)
 	}
 	b.logger.Logf("updateTUN: detached FD")
@@ -248,6 +252,7 @@ func (b *backend) updateTUN(rcfg *router.Config, dcfg *dns.OSConfig) (err error)
 	tunDev, _, err := tun.CreateUnmonitoredTUNFromFD(int(tunFD))
 	if err != nil {
 		closeFileDescriptor()
+		vpnService.service.UpdateVpnStatus(false)
 		return err
 	}
 	b.logger.Logf("updateTUN: created TUN device")
@@ -277,6 +282,8 @@ func closeFileDescriptor() error {
 // CloseVPN closes any active TUN devices.
 func (b *backend) CloseTUNs() {
 	b.lastCfg = nil
+	b.lastDNSCfg = nil
+	closeFileDescriptor()
 	b.devices.Shutdown()
 }
 
@@ -295,6 +302,9 @@ func (b *backend) NetworkChanged(ifname string) {
 		b.netMon.InjectEvent()
 	} else {
 		log.Printf("NetworkChanged: netMon is nil")
+	}
+	if b.backend != nil {
+		b.backend.DebugRebind()
 	}
 }
 

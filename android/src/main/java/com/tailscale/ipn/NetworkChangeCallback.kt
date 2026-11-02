@@ -97,7 +97,9 @@ object NetworkChangeCallback {
 
             lock.withLock {
               activeNetworks[network] = NetworkInfo(NetworkCapabilities(), LinkProperties())
-              recomputeDefaultNetworkLocked("onAvailable")
+              if (recomputeDefaultNetworkLocked("onAvailable")) {
+                maybeUpdateDNSConfig("onAvailable", dns)
+              }
             }
           }
 
@@ -201,7 +203,8 @@ object NetworkChangeCallback {
   private fun maybeUpdateDNSConfig(why: String, dns: DnsConfig) {
     val defaultNetwork = cachedDefaultNetwork
     if (defaultNetwork == null) {
-      TSLog.d(TAG, "$why: no default network available; not updating DNS")
+      TSLog.d(TAG, "$why: no default network available; notifying backend")
+      Libtailscale.onDNSConfigChanged("")
       return
     }
 
@@ -224,15 +227,16 @@ object NetworkChangeCallback {
 
     if (dns.updateDNSFromNetwork(sb.toString())) {
       TSLog.d(TAG, "$why: updated DNS config for iface=${info.linkProps.interfaceName}")
-
-      val gatewayIP =
-          info.linkProps.routes
-              .filter { it.isDefaultRoute && it.gateway != null }
-              .sortedBy { if (it.gateway is java.net.Inet4Address) 0 else 1 }
-              .firstNotNullOfOrNull { it.gateway?.hostAddress } ?: ""
-
-      Libtailscale.onGatewayChanged(gatewayIP)
-      Libtailscale.onDNSConfigChanged(info.linkProps.interfaceName)
     }
+
+    val gatewayIP =
+        info.linkProps.routes
+            .filter { it.isDefaultRoute && it.gateway != null }
+            .sortedBy { if (it.gateway is java.net.Inet4Address) 0 else 1 }
+            .firstNotNullOfOrNull { it.gateway?.hostAddress } ?: ""
+
+    Libtailscale.onGatewayChanged(gatewayIP)
+    val iface = info.linkProps.interfaceName ?: ""
+    Libtailscale.onDNSConfigChanged(iface)
   }
 }

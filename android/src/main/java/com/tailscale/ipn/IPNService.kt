@@ -43,6 +43,10 @@ open class IPNService : VpnService(), libtailscale.IPNService {
 
     NetworkChangeCallback.setUnderlyingNetworkListener { network ->
       updateUnderlyingNetwork(network)
+      if (network != null && !app.getAppScopedViewModel().vpnActive.value && UninitializedApp.get().isAbleToStartVPN()) {
+        TSLog.d(TAG, "Network became available while VPN is inactive, requesting VPN restart")
+        Libtailscale.requestVPN(this)
+      }
     }
   }
 
@@ -68,6 +72,7 @@ open class IPNService : VpnService(), libtailscale.IPNService {
           START_NOT_STICKY
         }
         ACTION_START_VPN -> {
+          closed = false
           showForegroundNotification()
           app.setWantRunning(true)
           Libtailscale.requestVPN(this)
